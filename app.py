@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime
 import socket
 from gevent.pywsgi import WSGIServer
+import socket
 
 app = Flask(__name__)
 
@@ -19,6 +20,53 @@ TEMP_DIR = 'temp'  # Temporary directory for storing images
 
 # Create temp directory if it doesn't exist
 os.makedirs(TEMP_DIR, exist_ok=True)
+
+def get_ip_addresses():
+    """
+    Get all IP addresses of the device, including localhost, LAN IP, and potential public IP.
+    
+    Returns:
+        dict: A dictionary containing different types of IP addresses
+            - 'localhost': The localhost address (usually 127.0.0.1)
+            - 'lan_ip': The local network IP address (e.g., 192.168.1.x)
+            - 'all_ips': List of all available IP addresses
+    """
+    ip_addresses = {
+        'localhost': '127.0.0.1',
+        'lan_ip': None,
+        'all_ips': []
+    }
+    
+    try:
+        # Get all available IP addresses
+        hostname = socket.gethostname()
+        all_ips = socket.gethostbyname_ex(hostname)[2]
+        ip_addresses['all_ips'] = all_ips
+        
+        # Find the LAN IP (usually starts with 192.168, 10., or 172.)
+        for ip in all_ips:
+            if ip.startswith(('192.168.'    )):
+                ip_addresses['lan_ip'] = ip
+                break
+                
+        # If no LAN IP was found, try an alternative method
+        if not ip_addresses['lan_ip']:
+            # Create a socket and connect to an external server
+            # This won't actually establish a connection but will help us get the local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                # Use Google's DNS server
+                s.connect(('8.8.8.8', 80))
+                ip_addresses['lan_ip'] = s.getsockname()[0]
+            except Exception:
+                pass
+            finally:
+                s.close()
+    
+    except Exception as e:
+        print(f"Error getting IP addresses: {e}")
+    
+    return ip_addresses 
 
 
 def base64_to_image(base64_string):
@@ -160,13 +208,17 @@ if __name__ == '__main__':
 
     print(f"Starting server on port {port}")
 
+    # Get IP addresses
+    ip_addresses = get_ip_addresses()
+    
     try:
         # Try starting with gevent
         http_server = WSGIServer(('0.0.0.0', port), app)
         print(f"Server is running at:")
-        print(f"Local: http://127.0.0.1:{port}")
+        print(f"Local: http://{ip_addresses['localhost']}:{port}")
         print(f"Network: http://0.0.0.0:{port}")
-        print(f"Your IP: http://192.168.1.6:{port}")
+        if ip_addresses['lan_ip']:
+            print(f"Your IP: http://{ip_addresses['lan_ip']}:{port}")
         http_server.serve_forever()
     except Exception as e:
         print(f"Failed to start server with gevent: {e}")
